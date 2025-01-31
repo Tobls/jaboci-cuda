@@ -6,7 +6,7 @@
 __global__ void jacobi(const float * __restrict__ A, const float* b, float * __restrict__ x, float* xNew, int N) {
     int row = blockIdx.x * blockDim.x + threadIdx.x; 
 
-    __shared__ float sharedX[64]; 
+    __shared__ float sharedX[256]; 
     sharedX[row] = x[row];
     __syncthreads();
 
@@ -20,7 +20,7 @@ __global__ void jacobi(const float * __restrict__ A, const float* b, float * __r
 }
 
 int main() {
-    const int N = 64;
+    const int N = 256;
     const int maxIterations = 10000;
     const float tolerance = 1e-5f;
     std::chrono::steady_clock::time_point start;

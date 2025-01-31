@@ -16,7 +16,7 @@ __global__ void jacobi(const float *A, const float *b, float *x, float *xNew, in
 }
 
 int main() {
-    const int N = 64;
+    const int N = 256;
     const int maxIterations = 10000;
     const float tolerance = 1e-5f;
     std::chrono::steady_clock::time_point start;

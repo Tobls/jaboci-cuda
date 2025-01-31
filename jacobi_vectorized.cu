@@ -1,47 +1,42 @@
-// Includes
-#include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <stdio.h>
-#include <stdlib.h>
 #include <chrono>
 
-// Jacobi iteration kernel using global memory
-__global__ void jacobi(const float *A, const float *b, float *x, float *xNew, int N) {
-    int row = blockIdx.x * gridDim.x + blockIdx.y;
-    int col = threadIdx.x * blockDim.x + threadIdx.y;
+__global__ void jacobi(const float * __restrict__ A, const float* b, float * __restrict__ x, float* xNew, int N) {
+    int row = blockIdx.x * blockDim.x + threadIdx.x; 
 
-    xNew[row] = 0.0f;
+    __shared__ float sharedX[256]; 
+    sharedX[row] = x[row];
     __syncthreads();
-    if (col != row) {
-        atomicAdd(&xNew[row], A[row * N + col] * x[col]);
-    }
 
-    __syncthreads();
-    if (col == row) {
-        xNew[row] = (b[row] - xNew[row]) / A[row * N + row];
+    float sum = 0.0f;
+    for (int col = 0; col < N; col += 4) {
+        float4 xVec = *reinterpret_cast<const float4 *>(&sharedX[col]);
+        float4 AVec = *reinterpret_cast<const float4 *>(&A[row * N + col]);
+        sum += (col != row) ? AVec.x * xVec.x : 0.0f;
+        sum += (col + 1 != row) ? AVec.y * xVec.y : 0.0f;
+        sum += (col + 2 != row) ? AVec.z * xVec.z : 0.0f;
+        sum += (col + 3 != row) ? AVec.w * xVec.w : 0.0f;
     }
+    xNew[row] = (b[row] - sum) / A[row * N + row];
 }
 
-// Host code to test Jacobi iteration
 int main() {
-    const int N = 64; // Size of the matrix and vectors
-    const int blockSize = 8;
+    const int N = 256;
     const int maxIterations = 10000;
     const float tolerance = 1e-5f;
-    std::chrono::steady_clock::time_point start; // start timer
-    std::chrono::steady_clock::time_point stop; // stop timer
+    std::chrono::steady_clock::time_point start;
+    std::chrono::steady_clock::time_point stop; 
 
-    // Host arrays
     float *A, *b, *x, *xNew;
     A = (float *)malloc(N * N * sizeof(float));
     b = (float *)malloc(N * sizeof(float));
     x = (float *)malloc(N * sizeof(float));
     xNew = (float *)malloc(N * sizeof(float));
 
-    // Initialize A, b, and x
     for (int i = 0; i < N; i++) {
-        x[i] = 0.0f; // Initial guess
+        x[i] = 0.0f; 
         b[i] = static_cast<float>(i);
         for (int j = 0; j < N; j++) {
             A[i * N + j] = rand() % 100 + 1;
@@ -55,19 +50,16 @@ int main() {
         A[i * N + i] = sum + (rand() % 100 + 1);
     }
 
-    // Device arrays
     float *dA, *db, *dx, *dxNew;
     cudaMalloc((void **)&dA, N * N * sizeof(float));
     cudaMalloc((void **)&db, N * sizeof(float));
     cudaMalloc((void **)&dx, N * sizeof(float));
     cudaMalloc((void **)&dxNew, N * sizeof(float));
 
-    // Copy data to device
     cudaMemcpy(dA, A, N * N * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(db, b, N * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(dx, x, N * sizeof(float), cudaMemcpyHostToDevice);
 
-    // Launch Jacobi iteration kernel
     start = std::chrono::steady_clock::now();
 
     for (int iter = 0; iter < maxIterations; iter++) {
@@ -78,9 +70,7 @@ int main() {
         cudaMemcpy(dx, x, N * sizeof(float), cudaMemcpyHostToDevice);
         cudaMemcpy(dxNew, xNew, N * sizeof(float), cudaMemcpyHostToDevice);
 
-        dim3 gridDim(blockSize, blockSize, 1);
-        dim3 blockDim(blockSize, blockSize, 1);
-        jacobi<<<gridDim, blockDim>>>(dA, db, dx, dxNew, N);
+        jacobi<<<1, N>>>(dA, db, dx, dxNew, N);
 
         cudaMemcpy(xNew, dxNew, N * sizeof(float), cudaMemcpyDeviceToHost);
 
@@ -98,12 +88,11 @@ int main() {
     stop = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(stop - start).count();
     printf("Solution:\n");
-    for (int i = 0; i < fminf(N, 10); i++) { // Print first 10 elements
+    for (int i = 0; i < fminf(N, 10); i++) { 
         printf("x[%d] = %f\n", i, x[i]);
     }
     printf("Elapsed time: %ld ms\n", elapsed);
 
-    // Cleanup
     free(A);
     free(b);
     free(x);
